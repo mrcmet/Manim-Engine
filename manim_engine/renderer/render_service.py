@@ -54,10 +54,14 @@ class RenderService(QObject):
                 self._bus.render_finished.emit(str(video_path))
             else:
                 self._bus.render_failed.emit(
-                    "Render completed but output video not found"
+                    "Render completed but no video was generated. "
+                    "Ensure your scene has animations (self.play(...))."
                 )
         else:
-            self._bus.render_failed.emit(result.error_message or "Unknown render error")
+            error_msg = result.error_message or "Unknown render error"
+            if result.stderr:
+                error_msg += f"\n\nDetails:\n{result.stderr[-500:]}"
+            self._bus.render_failed.emit(error_msg)
 
     def cancel_render(self):
         if self._worker and self._worker.isRunning():

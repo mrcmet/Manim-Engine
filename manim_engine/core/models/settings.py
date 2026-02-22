@@ -44,8 +44,8 @@ class AppSettings:
                 for name, config in self.ai_providers.items()
             },
             "last_project_id": self.last_project_id,
-            "window_geometry": self.window_geometry.hex() if self.window_geometry else None,
-            "window_state": self.window_state.hex() if self.window_state else None,
+            "window_geometry": bytes(self.window_geometry).hex() if self.window_geometry else None,
+            "window_state": bytes(self.window_state).hex() if self.window_state else None,
             "pin_hash": self.pin_hash,
             "pin_salt": self.pin_salt,
         }

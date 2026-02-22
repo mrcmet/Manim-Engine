@@ -45,10 +45,13 @@ class ManimEngineApp(QApplication):
         registry.register("gemini", GeminiProvider)
         registry.register("ollama", OllamaProvider)
 
-        # Initialize provider instances from settings
+        # Initialize provider instances from settings (skip unconfigured ones)
         settings = self._settings_service.load()
         for name, config in settings.ai_providers.items():
-            registry.create_provider(name, config)
+            try:
+                registry.create_provider(name, config)
+            except Exception:
+                pass  # Provider not yet configured (e.g. missing API key)
 
         ai_service = AIService(registry, self._signal_bus)
         render_service = RenderService(self._signal_bus)

@@ -51,14 +51,19 @@ class MainWindow(QMainWindow):
         self._wire_signals()
         self._apply_theme()
         self._restore_state()
+        self._load_sample_if_empty()
 
     def _create_panels(self):
         self._variable_explorer = VariableExplorerPanel()
+        self._variable_explorer.setObjectName("VariableExplorer")
         self._prompt_panel = PromptPanel()
+        self._prompt_panel.setObjectName("PromptPanel")
         self._preview_viewer = PreviewPanel()
         self._code_editor = CodeEditorPanel()
         self._project_explorer = ProjectExplorerPanel()
+        self._project_explorer.setObjectName("ProjectExplorer")
         self._version_timeline = TimelinePanel()
+        self._version_timeline.setObjectName("VersionTimeline")
 
     def _setup_layout(self):
         # Left docks: Variable Explorer (top) + Prompt Panel (bottom)
@@ -301,6 +306,13 @@ class MainWindow(QMainWindow):
             self._prompt_panel.set_providers(providers, active)
         # Refresh project list
         self._refresh_project_list()
+
+    def _load_sample_if_empty(self):
+        """Load sample code if editor is empty (no project loaded)."""
+        if not self._code_editor.get_code().strip():
+            sample = Path(__file__).parent.parent / "samples" / "circle_animation.py"
+            if sample.exists():
+                self._code_editor.set_code(sample.read_text())
 
     def _refresh_project_list(self):
         projects = self._project_service.list_projects()

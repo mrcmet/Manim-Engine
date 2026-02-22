@@ -105,12 +105,49 @@ class ThemeManager:
             margin: -4px 0;
             border-radius: 7px;
         }}
-        QComboBox, QLineEdit, QSpinBox, QDoubleSpinBox {{
+        QComboBox, QLineEdit, QSpinBox, QDoubleSpinBox, QFontComboBox {{
             background-color: {theme['background']};
             color: {theme['text']};
             border: 1px solid {theme['panel_border']};
-            padding: 4px;
+            padding: 4px 6px;
             border-radius: 3px;
+        }}
+        QGroupBox {{
+            color: {theme['text']};
+            border: 1px solid {theme['panel_border']};
+            border-radius: 4px;
+            margin-top: 8px;
+            padding-top: 16px;
+        }}
+        QGroupBox::title {{
+            subcontrol-origin: margin;
+            subcontrol-position: top left;
+            padding: 4px 8px;
+            color: {theme['accent']};
+        }}
+        QDialog {{
+            background-color: {theme['panel_bg']};
+            color: {theme['text']};
+        }}
+        QTabWidget::pane {{
+            border: 1px solid {theme['panel_border']};
+            background-color: {theme['panel_bg']};
+        }}
+        QTabBar::tab {{
+            background-color: {theme['button_bg']};
+            color: {theme['text']};
+            padding: 6px 16px;
+            border: 1px solid {theme['panel_border']};
+            border-bottom: none;
+            border-top-left-radius: 4px;
+            border-top-right-radius: 4px;
+        }}
+        QTabBar::tab:selected {{
+            background-color: {theme['panel_bg']};
+            color: {theme['accent']};
+        }}
+        QDialogButtonBox QPushButton {{
+            min-width: 80px;
         }}
         QScrollBar:horizontal, QScrollBar:vertical {{
             background: {theme['panel_bg']};

@@ -204,6 +204,35 @@ class CodeEditorWidget(QPlainTextEdit):
 
         self.setExtraSelections(extra_selections)
 
+    def insertFromMimeData(self, source) -> None:
+        """Handle paste operations — normalize indentation from copied text."""
+        if source.hasText():
+            text = source.text()
+            lines = text.split('\n')
+            if len(lines) > 1:
+                # Find the common extra whitespace on non-empty lines after the first.
+                # This fixes text copied from web code blocks that adds a leading space.
+                rest_non_empty = [l for l in lines[1:] if l.strip()]
+                if rest_non_empty:
+                    min_indent = min(len(l) - len(l.lstrip()) for l in rest_non_empty)
+                    # Only strip if line 1 (first top-level statement) has less indent,
+                    # indicating the extra whitespace is an artifact, not real indentation.
+                    first_indent = len(lines[0]) - len(lines[0].lstrip()) if lines[0].strip() else 0
+                    strip_amount = min_indent - first_indent
+                    if strip_amount > 0:
+                        stripped = [lines[0]]
+                        for l in lines[1:]:
+                            if len(l) >= strip_amount and l[:strip_amount].isspace():
+                                stripped.append(l[strip_amount:])
+                            else:
+                                stripped.append(l)
+                        text = '\n'.join(stripped)
+            cursor = self.textCursor()
+            cursor.insertText(text)
+            self.setTextCursor(cursor)
+        else:
+            super().insertFromMimeData(source)
+
     def keyPressEvent(self, event: QKeyEvent) -> None:
         """Handle key press events for auto-completion and custom behavior.
 

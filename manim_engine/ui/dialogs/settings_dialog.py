@@ -2,7 +2,7 @@ from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QTabWidget, QWidget, QFormLayout,
     QComboBox, QLineEdit, QSpinBox, QDoubleSpinBox, QCheckBox,
     QPushButton, QDialogButtonBox, QGroupBox, QFontComboBox,
-    QLabel, QHBoxLayout, QMessageBox,
+    QLabel, QHBoxLayout, QMessageBox, QScrollArea,
 )
 from PySide6.QtCore import Qt
 
@@ -16,9 +16,49 @@ class SettingsDialog(QDialog):
                  parent=None):
         super().__init__(parent)
         self.setWindowTitle("Settings")
-        self.setMinimumSize(500, 450)
+        self.setMinimumSize(700, 650)
         self._settings = settings_service
         self._theme_manager = theme_manager
+
+        # Apply dialog-level stylesheet for readable font sizes and input heights
+        self.setStyleSheet("""
+            SettingsDialog QLabel {
+                font-size: 13px;
+            }
+            SettingsDialog QLineEdit,
+            SettingsDialog QSpinBox,
+            SettingsDialog QDoubleSpinBox,
+            SettingsDialog QComboBox,
+            SettingsDialog QFontComboBox {
+                font-size: 13px;
+                min-height: 30px;
+            }
+            SettingsDialog QGroupBox {
+                font-size: 14px;
+                font-weight: bold;
+                padding-top: 16px;
+                margin-top: 8px;
+            }
+            SettingsDialog QGroupBox::title {
+                subcontrol-origin: margin;
+                subcontrol-position: top left;
+                padding: 4px 8px;
+            }
+            SettingsDialog QCheckBox {
+                font-size: 13px;
+            }
+            SettingsDialog QPushButton {
+                font-size: 13px;
+                min-height: 30px;
+            }
+            SettingsDialog QTabWidget::pane {
+                border: 1px solid palette(mid);
+            }
+            SettingsDialog QTabBar::tab {
+                font-size: 13px;
+                padding: 6px 16px;
+            }
+        """)
 
         layout = QVBoxLayout(self)
         self._tabs = QTabWidget()
@@ -37,8 +77,10 @@ class SettingsDialog(QDialog):
         self._load_settings()
 
     def _build_ai_tab(self):
-        tab = QWidget()
-        layout = QVBoxLayout(tab)
+        # Inner widget that holds all AI provider content
+        content = QWidget()
+        layout = QVBoxLayout(content)
+        layout.setSpacing(12)
 
         self._active_provider = QComboBox()
         self._active_provider.addItems(["anthropic", "openai", "gemini", "ollama"])
@@ -56,6 +98,7 @@ class SettingsDialog(QDialog):
         for provider in ["anthropic", "openai", "gemini", "ollama"]:
             group = QGroupBox(provider.capitalize())
             gform = QFormLayout(group)
+            gform.setSpacing(8)
 
             key_edit = QLineEdit()
             key_edit.setEchoMode(QLineEdit.Password)
@@ -92,7 +135,14 @@ class SettingsDialog(QDialog):
             layout.addWidget(group)
 
         layout.addStretch()
-        self._tabs.addTab(tab, "AI Providers")
+
+        # Wrap content in a scroll area so all 4 provider groups are accessible
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setWidget(content)
+        scroll.setFrameShape(QScrollArea.NoFrame)
+
+        self._tabs.addTab(scroll, "AI Providers")
 
     def _build_editor_tab(self):
         tab = QWidget()

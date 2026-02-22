@@ -78,6 +78,13 @@ class SceneFileManager:
             if mp4_files:
                 return mp4_files[0]
 
+        # Broader fallback: search entire videos dir for scene name
+        videos_dir = media_dir / "videos"
+        if videos_dir.exists():
+            for video_file in videos_dir.rglob(f"{scene_name}.*"):
+                if video_file.suffix in (".mp4", ".gif", ".webm", ".mov"):
+                    return video_file
+
         return None
 
     def copy_to_project(self, source: Path, dest_dir: Path) -> Path:
