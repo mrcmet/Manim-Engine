@@ -87,6 +87,10 @@ class VideoPlayerWidget(QWidget):
         if not path.exists():
             return
 
+        # Stop and clear so QMediaPlayer reloads even when URL is unchanged
+        self.media_player.stop()
+        self.media_player.setSource(QUrl())
+
         url = QUrl.fromLocalFile(str(path.resolve()))
         self.media_player.setSource(url)
         self.media_player.play()

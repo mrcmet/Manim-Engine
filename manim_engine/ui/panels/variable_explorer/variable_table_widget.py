@@ -72,11 +72,12 @@ class VariableTableWidget(QTableWidget):
                 if not var_info.editable:
                     value_item.setFlags(value_item.flags() & ~Qt.ItemIsEditable)
                 value_item.setData(Qt.UserRole, var_info.value)
-                value_item.setData(Qt.UserRole + 1, var_info.type)
+                var_type = getattr(var_info, "var_type", getattr(var_info, "type", "str"))
+                value_item.setData(Qt.UserRole + 1, var_type)
                 self.setItem(row, 1, value_item)
 
                 # Type (read-only)
-                type_item = QTableWidgetItem(var_info.type)
+                type_item = QTableWidgetItem(var_type)
                 type_item.setFlags(type_item.flags() & ~Qt.ItemIsEditable)
                 self.setItem(row, 2, type_item)
 
