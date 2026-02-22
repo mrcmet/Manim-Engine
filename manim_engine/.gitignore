@@ -1,0 +1,17 @@
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+media/
+*.mp4
+*.gif
+*.webm
+.DS_Store
+*.swp
+*.swo
+.idea/
+.vscode/
