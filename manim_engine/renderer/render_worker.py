@@ -1,5 +1,6 @@
 """Background worker thread for Manim rendering."""
 
+import os
 import subprocess
 import sys
 import time
@@ -80,6 +81,13 @@ class RenderWorker(QThread):
         if self.config.disable_caching:
             command.append("--disable_caching")
 
+        # Build environment — ensure TeX tools are on PATH regardless of how
+        # the app was launched (macOS GUI apps don't source /etc/paths.d/).
+        env = os.environ.copy()
+        tex_bin = "/Library/TeX/texbin"
+        if tex_bin not in env.get("PATH", ""):
+            env["PATH"] = tex_bin + os.pathsep + env.get("PATH", "")
+
         # Execute subprocess
         try:
             self._process = subprocess.Popen(
@@ -87,6 +95,7 @@ class RenderWorker(QThread):
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
+                env=env,
             )
 
             # Wait for completion with timeout
