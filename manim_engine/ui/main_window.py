@@ -7,6 +7,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QKeySequence
 
 from app.signals import SignalBus
+from core.services.code_validator import CodeValidator
 from core.services.project_service import ProjectService
 from core.services.version_service import VersionService
 from core.services.settings_service import SettingsService
@@ -128,6 +129,7 @@ class MainWindow(QMainWindow):
 
         # Render results → Preview
         bus.render_finished.connect(self._on_render_finished)
+        bus.render_image_finished.connect(self._on_render_image_finished)
         bus.render_failed.connect(self._on_render_failed)
         bus.render_started.connect(lambda: self._preview_viewer.show_loading())
 
@@ -161,7 +163,9 @@ class MainWindow(QMainWindow):
             )
             self._current_version_id = version.id
             self._refresh_timeline()
-        self._render_service.render(code)
+        valid, _ = CodeValidator.validate_syntax(code)
+        if valid:
+            self._render_service.render(code)
 
     def _on_ai_failed(self, error: str):
         self._prompt_panel.set_loading(False)
@@ -187,6 +191,9 @@ class MainWindow(QMainWindow):
 
     def _on_render_finished(self, video_path: str):
         self._preview_viewer.load_video(Path(video_path))
+
+    def _on_render_image_finished(self, image_path: str):
+        self._preview_viewer.load_image(Path(image_path))
         if self._current_project and self._current_version_id:
             self._version_service.set_video_path(
                 self._current_project.id, self._current_version_id, Path(video_path)

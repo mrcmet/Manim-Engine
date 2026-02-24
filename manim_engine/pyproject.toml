@@ -12,6 +12,8 @@ dependencies = [
     "httpx>=0.25.0",
     "keyring>=24.0.0",
     "manim>=0.18.0",
+    "pycodestyle>=2.11.0",
+    "autopep8>=2.0.0",
 ]
 
 [project.optional-dependencies]

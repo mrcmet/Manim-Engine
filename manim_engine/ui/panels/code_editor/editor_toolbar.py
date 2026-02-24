@@ -13,6 +13,7 @@ class EditorToolbar(QToolBar):
     # Signals
     run_clicked = Signal()              # Emitted when run button is clicked
     font_size_changed = Signal(int)     # Emitted when font size changes
+    autofix_clicked = Signal()          # Emitted when Auto-fix button is clicked
 
     def __init__(self, parent: Optional[QWidget] = None):
         """Initialize the toolbar.
@@ -36,6 +37,15 @@ class EditorToolbar(QToolBar):
         self._run_action.setShortcut(QKeySequence("Ctrl+Return"))
         self._run_action.triggered.connect(self._on_run_clicked)
         self.addAction(self._run_action)
+
+        self.addSeparator()
+
+        # Auto-fix button
+        self._autofix_action = QAction("Auto-fix", self)
+        self._autofix_action.setToolTip("Apply autopep8 style fixes (PEP 8)")
+        self._autofix_action.triggered.connect(lambda: self.autofix_clicked.emit())
+        self._autofix_action.setEnabled(False)
+        self.addAction(self._autofix_action)
 
         self.addSeparator()
 
@@ -65,6 +75,14 @@ class EditorToolbar(QToolBar):
             size: New font size in points.
         """
         self.font_size_changed.emit(size)
+
+    def set_autofix_enabled(self, enabled: bool) -> None:
+        """Enable or disable the Auto-fix button.
+
+        Args:
+            enabled: True when there are style warnings to fix.
+        """
+        self._autofix_action.setEnabled(enabled)
 
     def set_run_enabled(self, enabled: bool) -> None:
         """Enable or disable the run button.
