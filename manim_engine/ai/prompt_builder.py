@@ -60,13 +60,15 @@ class PromptBuilder:
     def build(
         self,
         user_prompt: str,
-        current_code: str | None = None
+        current_code: str | None = None,
+        selected_code: str | None = None,
     ) -> list[dict]:
         """Build a messages list for AI generation.
 
         Args:
             user_prompt: The user's description of what animation to create.
             current_code: Optional existing code to refine or modify.
+            selected_code: Optional highlighted code the user wants to focus on.
 
         Returns:
             A list of message dicts suitable for AI providers.
@@ -86,7 +88,15 @@ class PromptBuilder:
         # Build the user message content
         content_parts = []
 
-        if current_code:
+        if selected_code and selected_code.strip():
+            # Focused selection with full file context
+            content_parts.append("I have selected the following code to work on:")
+            content_parts.append(f"```python\n{selected_code}\n```")
+            if current_code:
+                content_parts.append("\nFull file context:")
+                content_parts.append(f"```python\n{current_code}\n```")
+            content_parts.append(f"\nRequest: {user_prompt}")
+        elif current_code:
             # If there's existing code, include it as context
             content_parts.append("Here is the current code:")
             content_parts.append(f"```python\n{current_code}\n```")

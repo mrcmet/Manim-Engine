@@ -1,4 +1,4 @@
-"""Tests for Variable Explorer panel."""
+"""Tests for Code Explorer panel and underlying variable table widget."""
 
 import pytest
 from PySide6.QtWidgets import QApplication
@@ -11,6 +11,7 @@ from ui.panels.variable_explorer.variable_table_widget import (
 from ui.panels.variable_explorer.variable_explorer_panel import (
     VariableExplorerPanel,
 )
+from core.models.code_structure import ClassNode, MethodNode, FieldNode
 
 
 @pytest.fixture
@@ -159,24 +160,73 @@ def test_variable_table_format_value(qapp):
 
 
 def test_variable_explorer_panel_creation(qapp):
-    """Test that variable explorer panel is created correctly."""
+    """Test that the Code Explorer panel is created with the correct title."""
     panel = VariableExplorerPanel()
 
-    assert panel.windowTitle() == "Variables"
+    assert panel.windowTitle() == "Code Explorer"
     assert panel._refresh_btn.text() == "Refresh"
 
 
-def test_variable_explorer_panel_set_variables(qapp, sample_variables):
-    """Test setting variables in explorer panel."""
+def test_set_code_structure(qapp):
+    """Test that set_code_structure populates the tree."""
     panel = VariableExplorerPanel()
-    panel.set_variables(sample_variables)
 
-    # Should populate the table widget
-    assert panel._variable_table.rowCount() == 6
+    classes = [
+        ClassNode(
+            name="MyScene",
+            base_names=["Scene"],
+            line_number=1,
+            methods=[
+                MethodNode(
+                    name="construct",
+                    line_number=2,
+                    fields=[
+                        FieldNode(name="circle", value_str="Circle()", line_number=3),
+                    ],
+                )
+            ],
+        )
+    ]
+    panel.set_code_structure(classes)
+
+    tree = panel._tree
+    assert tree.topLevelItemCount() == 1
+    cls_item = tree.topLevelItem(0)
+    assert "MyScene" in cls_item.text(0)
+    assert cls_item.childCount() == 1
+    method_item = cls_item.child(0)
+    assert "construct" in method_item.text(0)
+    assert method_item.childCount() == 1
+    field_item = method_item.child(0)
+    assert "circle" in field_item.text(0)
+
+
+def test_navigate_signal_emitted(qapp):
+    """Clicking a tree item emits navigate_to_line with the correct line number."""
+    panel = VariableExplorerPanel()
+
+    classes = [
+        ClassNode(
+            name="MyScene",
+            base_names=["Scene"],
+            line_number=5,
+            methods=[],
+        )
+    ]
+    panel.set_code_structure(classes)
+
+    emitted_lines = []
+    panel.navigate_to_line.connect(emitted_lines.append)
+
+    tree = panel._tree
+    cls_item = tree.topLevelItem(0)
+    tree.itemClicked.emit(cls_item, 0)
+
+    assert emitted_lines == [5]
 
 
 def test_variable_explorer_panel_refresh_signal(qapp):
-    """Test refresh button signal."""
+    """Test refresh button emits refresh_requested signal."""
     panel = VariableExplorerPanel()
 
     signal_emitted = False
@@ -187,7 +237,6 @@ def test_variable_explorer_panel_refresh_signal(qapp):
 
     panel.refresh_requested.connect(on_refresh)
 
-    # Click refresh button
     panel._refresh_btn.click()
 
     assert signal_emitted is True

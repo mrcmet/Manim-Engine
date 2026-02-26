@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QTextEdit,
     QPushButton,
+    QLabel,
 )
 from PySide6.QtCore import Signal, Qt
 from PySide6.QtGui import QKeySequence, QShortcut
@@ -45,6 +46,14 @@ class PromptInputWidget(QWidget):
 
         options_layout.addStretch()
         layout.addLayout(options_layout)
+
+        # Selection indicator label
+        self._selection_label = QLabel()
+        self._selection_label.setStyleSheet(
+            "color: #a6e3a1; font-size: 11px;"
+        )
+        self._selection_label.setVisible(False)
+        layout.addWidget(self._selection_label)
 
         # Prompt text input
         self.prompt_text = QTextEdit()
@@ -124,3 +133,16 @@ class PromptInputWidget(QWidget):
             True if checkbox is checked
         """
         return self.include_code_checkbox.isChecked()
+
+    def set_selection_active(self, text: str) -> None:
+        """Show or hide the selection indicator label.
+
+        Args:
+            text: Indicator text (e.g. "Selection active (5 lines)").
+                  Pass empty string to hide the label.
+        """
+        if text:
+            self._selection_label.setText(text)
+            self._selection_label.setVisible(True)
+        else:
+            self._selection_label.setVisible(False)

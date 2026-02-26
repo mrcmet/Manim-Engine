@@ -17,7 +17,9 @@ class SignalBus(QObject):
     render_started = Signal()
     render_progress = Signal(int)                # percent 0-100
     render_finished = Signal(str)                # output_video_path
+    render_image_finished = Signal(str)          # output_image_path
     render_failed = Signal(str)                  # error_message
+    render_failed_detail = Signal(object, str, str)  # (ParsedError, stdout, stderr)
 
     # Version timeline
     version_created = Signal(str)                # version_id

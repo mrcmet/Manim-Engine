@@ -101,3 +101,11 @@ class PromptPanel(QDockWidget):
             True if checkbox is checked
         """
         return self.input_widget.is_include_code_enabled()
+
+    def set_selection_active(self, text: str) -> None:
+        """Show or hide the code selection indicator.
+
+        Args:
+            text: Indicator text or empty string to hide.
+        """
+        self.input_widget.set_selection_active(text)

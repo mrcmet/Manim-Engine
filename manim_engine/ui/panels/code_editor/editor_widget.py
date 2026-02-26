@@ -78,6 +78,10 @@ class CodeEditorWidget(QPlainTextEdit):
         # Configure editor appearance
         self._setup_editor()
 
+        # Extra-selection state
+        self._current_line_selections: list = []
+        self._error_line_selections: list = []
+
         # Connect signals
         self.blockCountChanged.connect(self._update_line_number_area_width)
         self.updateRequest.connect(self._update_line_number_area)
@@ -191,18 +195,40 @@ class CodeEditorWidget(QPlainTextEdit):
 
     def _highlight_current_line(self) -> None:
         """Highlight the line containing the cursor."""
-        extra_selections = []
+        self._current_line_selections = []
 
         if not self.isReadOnly():
             selection = QTextEdit.ExtraSelection()
-            line_color = QColor("#313244")
-            selection.format.setBackground(line_color)
+            selection.format.setBackground(QColor("#313244"))
             selection.format.setProperty(QTextFormat.Property.FullWidthSelection, True)
             selection.cursor = self.textCursor()
             selection.cursor.clearSelection()
-            extra_selections.append(selection)
+            self._current_line_selections = [selection]
 
-        self.setExtraSelections(extra_selections)
+        self._apply_extra_selections()
+
+    def _apply_extra_selections(self) -> None:
+        """Merge current-line and error-line highlights and apply them."""
+        self.setExtraSelections(
+            self._current_line_selections + self._error_line_selections
+        )
+
+    def set_error_line(self, line: int | None) -> None:
+        """Highlight a line with a red tint to mark a render error.
+
+        Args:
+            line: 1-based line number to highlight, or None to clear.
+        """
+        self._error_line_selections = []
+        if line is not None:
+            block = self.document().findBlockByLineNumber(line - 1)
+            if block.isValid():
+                sel = QTextEdit.ExtraSelection()
+                sel.format.setBackground(QColor("#3d1a1a"))
+                sel.format.setProperty(QTextFormat.Property.FullWidthSelection, True)
+                sel.cursor = QTextCursor(block)
+                self._error_line_selections = [sel]
+        self._apply_extra_selections()
 
     def insertFromMimeData(self, source) -> None:
         """Handle paste operations — normalize indentation from copied text."""

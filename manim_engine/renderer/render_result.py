@@ -1,7 +1,11 @@
 """Render result data structure for Manim Engine."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from renderer.error_parser import ParsedError
 
 
 @dataclass
@@ -15,6 +19,7 @@ class RenderResult:
         error_message: Error description if render failed
         stdout: Standard output from Manim process
         stderr: Standard error from Manim process
+        parsed_error: Structured error info (only populated on failure)
     """
     success: bool
     video_path: Path | None
@@ -22,3 +27,4 @@ class RenderResult:
     error_message: str | None
     stdout: str
     stderr: str
+    parsed_error: "ParsedError | None" = field(default=None)

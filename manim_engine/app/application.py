@@ -6,6 +6,7 @@ from core.services.settings_service import SettingsService
 from core.services.auth_service import AuthService
 from core.services.project_service import ProjectService
 from core.services.version_service import VersionService
+from core.services.snippets_service import SnippetsService
 
 
 class ManimEngineApp(QApplication):
@@ -19,6 +20,7 @@ class ManimEngineApp(QApplication):
         self._auth_service = AuthService(self._settings_service)
         self._project_service = ProjectService()
         self._version_service = VersionService()
+        self._snippets_service = SnippetsService()
 
     def _ensure_data_dirs(self):
         DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -47,6 +49,17 @@ class ManimEngineApp(QApplication):
 
         # Initialize provider instances from settings (skip unconfigured ones)
         settings = self._settings_service.load()
+
+        # Pre-populate Ollama defaults on first launch
+        if "ollama" not in settings.ai_providers:
+            from core.models.ai_config import AIProviderConfig
+            settings.ai_providers["ollama"] = AIProviderConfig(
+                provider_name="ollama",
+                model_name="llama3",
+                base_url="http://localhost:11434",
+            )
+            self._settings_service.save(settings)
+
         for name, config in settings.ai_providers.items():
             try:
                 registry.create_provider(name, config)
@@ -65,6 +78,7 @@ class ManimEngineApp(QApplication):
             render_service=render_service,
             settings_service=self._settings_service,
             theme_manager=theme_manager,
+            snippets_service=self._snippets_service,
         )
         self._main_window.show()
         return self.exec()

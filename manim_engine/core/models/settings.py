@@ -29,6 +29,9 @@ class AppSettings:
     pin_hash: str | None = None
     pin_salt: str | None = None
 
+    # AI Context
+    custom_prompt_context: str = ""
+
     def to_dict(self) -> dict:
         data = {
             "editor_font_family": self.editor_font_family,
@@ -48,6 +51,7 @@ class AppSettings:
             "window_state": bytes(self.window_state).hex() if self.window_state else None,
             "pin_hash": self.pin_hash,
             "pin_salt": self.pin_salt,
+            "custom_prompt_context": self.custom_prompt_context,
         }
         return data
 
@@ -75,4 +79,5 @@ class AppSettings:
             window_state=bytes.fromhex(state) if state else None,
             pin_hash=data.get("pin_hash"),
             pin_salt=data.get("pin_salt"),
+            custom_prompt_context=data.get("custom_prompt_context", ""),
         )

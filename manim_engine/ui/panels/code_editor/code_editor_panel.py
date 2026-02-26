@@ -3,12 +3,14 @@
 from typing import Optional
 
 from PySide6.QtCore import Signal, QTimer
+from PySide6.QtGui import QTextCursor
 from PySide6.QtWidgets import QDockWidget, QWidget, QVBoxLayout
 
 from core.services.code_validator import CodeValidator
 from core.services.linter import Linter
 from .editor_toolbar import EditorToolbar
 from .editor_widget import CodeEditorWidget
+from .error_console_widget import ErrorConsoleWidget
 from .lint_status_bar import LintStatusBar
 
 
@@ -46,6 +48,11 @@ class CodeEditorPanel(QDockWidget):
         # Lint status bar below editor
         self._lint_bar = LintStatusBar()
         layout.addWidget(self._lint_bar)
+
+        # Error console (hidden until a render failure occurs)
+        self._error_console = ErrorConsoleWidget()
+        layout.addWidget(self._error_console)
+        self._error_console.dismissed.connect(self._on_error_console_dismissed)
 
         self.setWidget(main_widget)
 
@@ -198,6 +205,25 @@ class CodeEditorPanel(QDockWidget):
         """
         self._editor.set_theme(theme_dict)
 
+    def get_selected_text(self) -> str:
+        """Return currently selected text from editor, or empty string."""
+        cursor = self._editor.textCursor()
+        return cursor.selectedText() if cursor.hasSelection() else ""
+
+    def navigate_to_line(self, line: int) -> None:
+        """Move the cursor to a 1-based line number and centre the view.
+
+        Args:
+            line: 1-based line number to navigate to.
+        """
+        block = self._editor.document().findBlockByLineNumber(line - 1)
+        if not block.isValid():
+            return
+        cursor = QTextCursor(block)
+        self._editor.setTextCursor(cursor)
+        self._editor.centerCursor()
+        self._editor.setFocus()
+
     def get_editor_widget(self) -> CodeEditorWidget:
         """Get the underlying editor widget.
 
@@ -213,3 +239,23 @@ class CodeEditorPanel(QDockWidget):
             The EditorToolbar instance.
         """
         return self._toolbar
+
+    def show_render_error(self, parsed_error, stdout: str, stderr: str) -> None:
+        """Show the error console and highlight the offending line.
+
+        Args:
+            parsed_error: ParsedError from ManimErrorParser.
+            stdout: Raw stdout from the render subprocess.
+            stderr: Raw stderr from the render subprocess.
+        """
+        self._error_console.show_error(parsed_error, stdout, stderr)
+        self._editor.set_error_line(parsed_error.line_number)
+
+    def clear_render_error(self) -> None:
+        """Hide the error console and remove the error line highlight."""
+        self._error_console.clear()
+        self._editor.set_error_line(None)
+
+    def _on_error_console_dismissed(self) -> None:
+        """Clear error line highlight when user dismisses the console."""
+        self._editor.set_error_line(None)

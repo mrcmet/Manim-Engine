@@ -2,13 +2,41 @@ from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QTabWidget, QWidget, QFormLayout,
     QComboBox, QLineEdit, QSpinBox, QDoubleSpinBox, QCheckBox,
     QPushButton, QDialogButtonBox, QGroupBox, QFontComboBox,
-    QLabel, QHBoxLayout, QMessageBox, QScrollArea,
+    QLabel, QHBoxLayout, QMessageBox, QScrollArea, QPlainTextEdit,
 )
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QThread, Signal as QSignal
 
 from core.services.settings_service import SettingsService
 from core.models.ai_config import AIProviderConfig
 from ui.theme import ThemeManager
+
+
+class OllamaFetchWorker(QThread):
+    """Background worker for querying a local Ollama instance."""
+
+    models_ready = QSignal(list)   # list[str] model names
+    connection_ok = QSignal(str)   # version string
+    error = QSignal(str)
+
+    def __init__(self, base_url: str, mode: str):
+        super().__init__()
+        self._base_url = base_url.rstrip("/")
+        self._mode = mode  # "models" | "test"
+
+    def run(self):
+        import httpx
+        try:
+            if self._mode == "models":
+                r = httpx.get(f"{self._base_url}/api/tags", timeout=5)
+                r.raise_for_status()
+                names = [m["name"] for m in r.json().get("models", [])]
+                self.models_ready.emit(names)
+            else:
+                r = httpx.get(f"{self._base_url}/api/version", timeout=5)
+                r.raise_for_status()
+                self.connection_ok.emit(r.json().get("version", "OK"))
+        except Exception as e:
+            self.error.emit(str(e))
 
 
 class SettingsDialog(QDialog):
@@ -65,9 +93,11 @@ class SettingsDialog(QDialog):
         layout.addWidget(self._tabs)
 
         self._build_ai_tab()
+        self._build_ai_context_tab()
         self._build_editor_tab()
         self._build_render_tab()
         self._build_security_tab()
+        self._ollama_worker: OllamaFetchWorker | None = None
 
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         buttons.accepted.connect(self._save_and_accept)
@@ -95,6 +125,13 @@ class SettingsDialog(QDialog):
         self._max_tokens = {}
         self._temperatures = {}
 
+        defaults = {
+            "anthropic": "claude-sonnet-4-5-20250929",
+            "openai": "gpt-4o",
+            "gemini": "gemini-2.0-flash",
+            "ollama": "llama3",
+        }
+
         for provider in ["anthropic", "openai", "gemini", "ollama"]:
             group = QGroupBox(provider.capitalize())
             gform = QFormLayout(group)
@@ -106,18 +143,40 @@ class SettingsDialog(QDialog):
             self._api_keys[provider] = key_edit
             gform.addRow("API Key:", key_edit)
 
-            model_edit = QLineEdit()
-            defaults = {"anthropic": "claude-sonnet-4-5-20250929", "openai": "gpt-4o",
-                        "gemini": "gemini-2.0-flash", "ollama": "llama3"}
-            model_edit.setPlaceholderText(defaults.get(provider, ""))
-            self._model_names[provider] = model_edit
-            gform.addRow("Model:", model_edit)
-
             if provider == "ollama":
+                # Editable combo with Refresh button
+                model_combo = QComboBox()
+                model_combo.setEditable(True)
+                model_combo.addItem(defaults["ollama"])
+                self._model_names[provider] = model_combo
+
+                model_row = QHBoxLayout()
+                model_row.addWidget(model_combo)
+                refresh_btn = QPushButton("Refresh")
+                refresh_btn.setMaximumWidth(80)
+                refresh_btn.clicked.connect(self._fetch_ollama_models)
+                model_row.addWidget(refresh_btn)
+                gform.addRow("Model:", model_row)
+
                 url_edit = QLineEdit()
                 url_edit.setPlaceholderText("http://localhost:11434")
                 self._base_urls[provider] = url_edit
                 gform.addRow("Base URL:", url_edit)
+
+                # Test Connection row
+                test_row = QHBoxLayout()
+                test_btn = QPushButton("Test Connection")
+                test_btn.clicked.connect(self._test_ollama_connection)
+                test_row.addWidget(test_btn)
+                self._ollama_status_label = QLabel()
+                test_row.addWidget(self._ollama_status_label)
+                test_row.addStretch()
+                gform.addRow("", test_row)
+            else:
+                model_edit = QLineEdit()
+                model_edit.setPlaceholderText(defaults.get(provider, ""))
+                self._model_names[provider] = model_edit
+                gform.addRow("Model:", model_edit)
 
             tokens = QSpinBox()
             tokens.setRange(256, 16384)
@@ -210,7 +269,12 @@ class SettingsDialog(QDialog):
 
         for name, config in s.ai_providers.items():
             if name in self._model_names:
-                self._model_names[name].setText(config.model_name)
+                widget = self._model_names[name]
+                if isinstance(widget, QComboBox):
+                    # Editable combo (Ollama): set text directly
+                    widget.setCurrentText(config.model_name)
+                else:
+                    widget.setText(config.model_name)
             if name in self._max_tokens:
                 self._max_tokens[name].setValue(config.max_tokens)
             if name in self._temperatures:
@@ -221,6 +285,8 @@ class SettingsDialog(QDialog):
             key = self._settings.get_api_key(name)
             if key and name in self._api_keys:
                 self._api_keys[name].setText(key)
+
+        self._custom_context.setPlainText(s.custom_prompt_context)
 
         self._font_family.setCurrentFont(self._font_family.font())
         self._font_size.setValue(s.editor_font_size)
@@ -250,16 +316,21 @@ class SettingsDialog(QDialog):
         s.render_timeout = self._render_timeout.value()
         s.output_format = self._output_format.currentText()
 
+        s.custom_prompt_context = self._custom_context.toPlainText().strip()
+
         # Save provider configs
         for provider in ["anthropic", "openai", "gemini", "ollama"]:
             api_key = self._api_keys[provider].text()
             if api_key:
                 self._settings.store_api_key(provider, api_key)
 
+            widget = self._model_names[provider]
+            model_name = widget.currentText() if isinstance(widget, QComboBox) else widget.text()
+
             config = AIProviderConfig(
                 provider_name=provider,
                 api_key=None,  # Stored separately in keyring
-                model_name=self._model_names[provider].text(),
+                model_name=model_name,
                 base_url=self._base_urls.get(provider, None) and self._base_urls[provider].text(),
                 max_tokens=self._max_tokens[provider].value(),
                 temperature=self._temperatures[provider].value(),
@@ -268,6 +339,72 @@ class SettingsDialog(QDialog):
 
         self._settings.save(s)
         self.accept()
+
+    def _build_ai_context_tab(self):
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        layout.setSpacing(12)
+
+        description = QLabel(
+            "Additional instructions appended to the system prompt on every AI request.\n"
+            "Use this to set project-wide style preferences or constraints."
+        )
+        description.setWordWrap(True)
+        layout.addWidget(description)
+
+        self._custom_context = QPlainTextEdit()
+        self._custom_context.setMinimumHeight(120)
+        self._custom_context.setPlaceholderText(
+            "e.g. Always use Catppuccin Mocha colors. Default scene size 1080p."
+        )
+        layout.addWidget(self._custom_context)
+        layout.addStretch()
+
+        self._tabs.addTab(tab, "AI Context")
+
+    def _fetch_ollama_models(self):
+        base_url = self._base_urls.get("ollama")
+        url = base_url.text().strip() if base_url else "http://localhost:11434"
+        if not url:
+            url = "http://localhost:11434"
+        self._ollama_status_label.setText("Fetching models…")
+        self._ollama_status_label.setStyleSheet("color: palette(text);")
+        self._ollama_worker = OllamaFetchWorker(url, "models")
+        self._ollama_worker.models_ready.connect(self._on_ollama_models)
+        self._ollama_worker.error.connect(self._on_ollama_error)
+        self._ollama_worker.start()
+
+    def _test_ollama_connection(self):
+        base_url = self._base_urls.get("ollama")
+        url = base_url.text().strip() if base_url else "http://localhost:11434"
+        if not url:
+            url = "http://localhost:11434"
+        self._ollama_status_label.setText("Testing…")
+        self._ollama_status_label.setStyleSheet("color: palette(text);")
+        self._ollama_worker = OllamaFetchWorker(url, "test")
+        self._ollama_worker.connection_ok.connect(self._on_ollama_connected)
+        self._ollama_worker.error.connect(self._on_ollama_error)
+        self._ollama_worker.start()
+
+    def _on_ollama_models(self, names: list):
+        combo = self._model_names.get("ollama")
+        if combo and isinstance(combo, QComboBox):
+            current = combo.currentText()
+            combo.clear()
+            combo.addItems(names)
+            idx = combo.findText(current)
+            combo.setCurrentIndex(idx if idx >= 0 else 0)
+        count = len(names)
+        self._ollama_status_label.setText(f"{count} model(s) found")
+        self._ollama_status_label.setStyleSheet("color: #a6e3a1;")
+
+    def _on_ollama_connected(self, version: str):
+        self._ollama_status_label.setText(f"Connected (v{version})")
+        self._ollama_status_label.setStyleSheet("color: #a6e3a1;")
+
+    def _on_ollama_error(self, error: str):
+        self._ollama_status_label.setText(f"Error: {error}")
+        self._ollama_status_label.setStyleSheet("color: #f38ba8;")
 
     def _change_pin(self):
         from ui.dialogs.pin_dialog import PinDialog

@@ -142,6 +142,7 @@ class MainWindow(QMainWindow):
         bus.render_finished.connect(self._on_render_finished)
         bus.render_image_finished.connect(self._on_render_image_finished)
         bus.render_failed.connect(self._on_render_failed)
+        bus.render_failed_detail.connect(self._on_render_failed_detail)
         bus.render_started.connect(lambda: self._preview_viewer.show_loading())
 
         # Version timeline
@@ -217,9 +218,11 @@ class MainWindow(QMainWindow):
 
     def _on_render_finished(self, video_path: str):
         self._preview_viewer.load_video(Path(video_path))
+        self._code_editor.clear_render_error()
 
     def _on_render_image_finished(self, image_path: str):
         self._preview_viewer.load_image(Path(image_path))
+        self._code_editor.clear_render_error()
         if self._current_project and self._current_version_id:
             self._version_service.set_video_path(
                 self._current_project.id, self._current_version_id, Path(image_path)
@@ -227,6 +230,9 @@ class MainWindow(QMainWindow):
 
     def _on_render_failed(self, error: str):
         self._preview_viewer.show_error(error)
+
+    def _on_render_failed_detail(self, parsed_error, stdout: str, stderr: str):
+        self._code_editor.show_render_error(parsed_error, stdout, stderr)
 
     def _on_version_selected(self, version_id: str):
         if not self._current_project:

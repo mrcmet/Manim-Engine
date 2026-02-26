@@ -5,6 +5,7 @@ from PySide6.QtCore import QObject
 
 from app.signals import SignalBus
 from core.services.code_validator import CodeValidator
+from renderer.error_parser import ManimErrorParser
 from renderer.render_config import RenderConfig
 from renderer.render_result import RenderResult
 from renderer.render_worker import RenderWorker
@@ -53,15 +54,25 @@ class RenderService(QObject):
                 self._last_output = video_path
                 self._bus.render_finished.emit(str(video_path))
             else:
-                self._bus.render_failed.emit(
-                    "Render completed but no video was generated. "
-                    "Ensure your scene has animations (self.play(...))."
+                # No video — check for static image output (no-animation scene)
+                image_path = self._file_manager.find_output_image(
+                    scene_file, scene_name, self._media_dir
                 )
+                if image_path and image_path.exists():
+                    self._last_output = image_path
+                    self._bus.render_image_finished.emit(str(image_path))
+                else:
+                    self._bus.render_failed.emit(
+                        "Render completed but no output was generated. "
+                        "Ensure your scene has animations (self.play(...)) "
+                        "or a valid static scene."
+                    )
         else:
-            error_msg = result.error_message or "Unknown render error"
-            if result.stderr:
-                error_msg += f"\n\nDetails:\n{result.stderr[-500:]}"
-            self._bus.render_failed.emit(error_msg)
+            parsed = ManimErrorParser.parse(result.stderr, str(scene_file))
+            self._bus.render_failed.emit(
+                parsed.summary or result.error_message or "Unknown render error"
+            )
+            self._bus.render_failed_detail.emit(parsed, result.stdout, result.stderr)
 
     def cancel_render(self):
         if self._worker and self._worker.isRunning():

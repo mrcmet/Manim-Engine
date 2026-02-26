@@ -107,3 +107,53 @@ class TestPromptBuilder:
         messages = builder.build("Update this", current_code)
 
         assert current_code in messages[0]["content"]
+
+    def test_build_with_selected_code(self):
+        """Test building a prompt with a highlighted code selection."""
+        builder = PromptBuilder()
+        user_prompt = "Refactor this function"
+        current_code = "from manim import *\n\nclass MyScene(Scene):\n    def construct(self):\n        c = Circle()\n        self.add(c)"
+        selected_code = "c = Circle()\n        self.add(c)"
+
+        messages = builder.build(user_prompt, current_code, selected_code)
+
+        assert len(messages) == 1
+        content = messages[0]["content"]
+        assert "I have selected the following code" in content
+        assert selected_code in content
+        assert current_code in content
+        assert user_prompt in content
+
+    def test_build_selected_code_without_full_file(self):
+        """Test that selected_code works even when current_code is None."""
+        builder = PromptBuilder()
+        selected_code = "x = 42"
+
+        messages = builder.build("Explain this", selected_code=selected_code)
+
+        content = messages[0]["content"]
+        assert "I have selected the following code" in content
+        assert selected_code in content
+
+    def test_build_selected_code_overrides_current_code_header(self):
+        """Selected code path should not use the 'Here is the current code' header."""
+        builder = PromptBuilder()
+        current_code = "from manim import *"
+        selected_code = "x = 1"
+
+        messages = builder.build("Fix it", current_code, selected_code)
+
+        content = messages[0]["content"]
+        assert "Here is the current code" not in content
+        assert "I have selected the following code" in content
+
+    def test_build_empty_selected_code_falls_back_to_current_code(self):
+        """Empty/whitespace selected_code should behave like no selection."""
+        builder = PromptBuilder()
+        current_code = "from manim import *"
+
+        messages = builder.build("Improve this", current_code, selected_code="   ")
+
+        content = messages[0]["content"]
+        assert "Here is the current code" in content
+        assert "I have selected the following code" not in content

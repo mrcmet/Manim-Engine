@@ -20,16 +20,22 @@ class AIService(QObject):
     def set_active_provider(self, name: str) -> None:
         self._active_provider_name = name
 
-    def generate_code(self, prompt: str, current_code: str | None = None) -> None:
+    def generate_code(
+        self,
+        prompt: str,
+        current_code: str | None = None,
+        selected_code: str | None = None,
+        custom_context: str | None = None,
+    ) -> None:
         if self._active_provider_name is None:
             self._bus.ai_generation_failed.emit("No AI provider selected")
             return
 
-        try:
-            provider = self._registry.get_provider(self._active_provider_name)
-        except KeyError:
+        provider = self._registry.get_provider(self._active_provider_name)
+        if provider is None:
             self._bus.ai_generation_failed.emit(
-                f"Provider '{self._active_provider_name}' not configured"
+                f"Provider '{self._active_provider_name}' is not configured. "
+                "Check Settings → AI Providers."
             )
             return
 
@@ -37,7 +43,14 @@ class AIService(QObject):
             self._worker.cancel()
             self._worker.wait()
 
-        messages = self._prompt_builder.build(prompt, current_code)
+        from ai.prompt_builder import SYSTEM_PROMPT
+        if custom_context and custom_context.strip():
+            effective = SYSTEM_PROMPT + "\n\n## Additional Instructions\n" + custom_context.strip()
+            self._prompt_builder.set_system_prompt(effective)
+        else:
+            self._prompt_builder.set_system_prompt(SYSTEM_PROMPT)
+
+        messages = self._prompt_builder.build(prompt, current_code, selected_code)
         system_prompt = self._prompt_builder.get_system_prompt()
 
         self._bus.ai_generation_started.emit()
@@ -51,6 +64,13 @@ class AIService(QObject):
 
     def _on_generation_failed(self, error: str):
         self._bus.ai_generation_failed.emit(error)
+
+    def reload_provider(self, name: str, config) -> None:
+        """Recreate a provider instance from updated config (e.g. after settings change)."""
+        try:
+            self._registry.create_provider(name, config)
+        except Exception:
+            pass  # Provider may lack API key — silently skip
 
     def get_available_providers(self) -> list[str]:
         return self._registry.list_providers()

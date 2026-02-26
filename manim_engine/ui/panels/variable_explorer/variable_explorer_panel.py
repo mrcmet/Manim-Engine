@@ -1,4 +1,4 @@
-"""Variable Explorer panel for viewing and editing animation variables."""
+"""Code Explorer panel — displays class/method/field tree from parsed source."""
 
 from PySide6.QtWidgets import (
     QDockWidget,
@@ -9,27 +9,28 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Signal
 
-from .variable_table_widget import VariableTableWidget, VariableInfo
-from .variable_delegate import VariableDelegate
+from .code_tree_widget import CodeTreeWidget
+from core.models.code_structure import ClassNode
 
 
 class VariableExplorerPanel(QDockWidget):
-    """Dock widget for exploring and editing animation variables."""
+    """Dock widget showing a tree of classes, methods, and variable assignments.
+
+    Clicking any tree node emits navigate_to_line so the code editor can
+    move its cursor to the corresponding source line.
+    """
+
+    # Forwarded from CodeTreeWidget — connected externally via property
+    refresh_requested = Signal()
 
     def __init__(self, parent=None):
-        """Initialize the variable explorer panel.
-
-        Args:
-            parent: Parent widget
-        """
-        super().__init__("Variables", parent)
+        super().__init__("Code Explorer", parent)
         self.setFeatures(
-            QDockWidget.DockWidgetMovable
-            | QDockWidget.DockWidgetFloatable
-            | QDockWidget.DockWidgetClosable
+            QDockWidget.DockWidgetFeature.DockWidgetMovable
+            | QDockWidget.DockWidgetFeature.DockWidgetFloatable
+            | QDockWidget.DockWidgetFeature.DockWidgetClosable
         )
 
-        # Main widget
         main_widget = QWidget()
         layout = QVBoxLayout(main_widget)
         layout.setContentsMargins(4, 4, 4, 4)
@@ -40,63 +41,35 @@ class VariableExplorerPanel(QDockWidget):
         toolbar_layout.setSpacing(4)
 
         self._refresh_btn = QPushButton("Refresh")
-        self._refresh_btn.clicked.connect(self._on_refresh_clicked)
+        self._refresh_btn.clicked.connect(self.refresh_requested)
         toolbar_layout.addWidget(self._refresh_btn)
-
         toolbar_layout.addStretch()
 
         layout.addLayout(toolbar_layout)
 
-        # Variable table
-        self._variable_table = VariableTableWidget()
-
-        # Set custom delegate for column 1 (value column)
-        self._delegate = VariableDelegate()
-        self._variable_table.setItemDelegateForColumn(1, self._delegate)
-
-        layout.addWidget(self._variable_table)
+        # Code tree
+        self._tree = CodeTreeWidget()
+        layout.addWidget(self._tree)
 
         self.setWidget(main_widget)
 
-        # Track refresh requested signal
-        self._refresh_requested_signal = Signal()
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
 
-    def set_variables(self, variables: list[VariableInfo]):
-        """Set the variables to display.
+    @property
+    def navigate_to_line(self) -> Signal:
+        """Signal(int) emitted when the user clicks a tree node.
+
+        Returns:
+            The navigate_to_line signal from the underlying CodeTreeWidget.
+        """
+        return self._tree.navigate_to_line
+
+    def set_code_structure(self, classes: list[ClassNode]) -> None:
+        """Update the tree to reflect the given parsed class structure.
 
         Args:
-            variables: List of VariableInfo objects
+            classes: List of ClassNode objects from CodeParser.
         """
-        self._variable_table.set_variables(variables)
-
-    @property
-    def variable_edited(self) -> Signal:
-        """Signal emitted when a variable is edited.
-
-        Returns:
-            Signal(str, object) with variable name and new value
-        """
-        return self._variable_table.variable_edited
-
-    @property
-    def refresh_requested(self) -> Signal:
-        """Signal emitted when refresh is requested.
-
-        Returns:
-            Signal with no arguments
-        """
-        # Create a proper signal if it doesn't exist
-        if not hasattr(self, '_refresh_requested_signal_obj'):
-            from PySide6.QtCore import QObject
-
-            class RefreshSignalEmitter(QObject):
-                refresh_requested = Signal()
-
-            self._refresh_requested_signal_obj = RefreshSignalEmitter()
-
-        return self._refresh_requested_signal_obj.refresh_requested
-
-    def _on_refresh_clicked(self):
-        """Handle refresh button click."""
-        if hasattr(self, '_refresh_requested_signal_obj'):
-            self._refresh_requested_signal_obj.refresh_requested.emit()
+        self._tree.set_code_structure(classes)

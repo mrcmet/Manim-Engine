@@ -89,6 +89,23 @@ class ThemeManager:
             color: {theme['text']};
             gridline-color: {theme['panel_border']};
         }}
+        QTreeWidget, QTreeView {{
+            background-color: {theme['background']};
+            color: {theme['text']};
+            border: 1px solid {theme['panel_border']};
+            outline: 0;
+        }}
+        QTreeWidget::item, QTreeView::item {{
+            padding: 3px 4px;
+            border: none;
+        }}
+        QTreeWidget::item:selected, QTreeView::item:selected {{
+            background-color: {theme['button_bg']};
+            color: {theme['text']};
+        }}
+        QTreeWidget::item:hover, QTreeView::item:hover {{
+            background-color: {theme['current_line']};
+        }}
         QHeaderView::section {{
             background-color: {theme['panel_border']};
             color: {theme['text']};

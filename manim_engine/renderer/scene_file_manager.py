@@ -87,6 +87,56 @@ class SceneFileManager:
 
         return None
 
+    def find_output_image(
+        self,
+        scene_file: Path,
+        scene_name: str,
+        media_dir: Path,
+    ) -> Optional[Path]:
+        """Locate the output image file from a no-animation Manim render.
+
+        Manim outputs static images to:
+        media_dir/images/scene_file_stem/scene_name.png
+
+        Version-stamped filenames (e.g. MyScene_ManimCE_v0.18.0.png) are
+        handled via a glob fallback.
+
+        Args:
+            scene_file: Path to the scene file that was rendered
+            scene_name: Name of the scene class
+            media_dir: Media directory passed to Manim
+
+        Returns:
+            Path to output image if found, None otherwise
+        """
+        scene_file_stem = scene_file.stem
+        images_dir = media_dir / "images" / scene_file_stem
+
+        # Tier 1: exact expected path
+        expected_path = images_dir / f"{scene_name}.png"
+        if expected_path.exists():
+            return expected_path
+
+        # Tier 2: glob for any PNG whose name starts with scene_name
+        # (handles version-stamped names like SceneName_ManimCE_v0.18.0.png)
+        if images_dir.exists():
+            png_files = sorted(images_dir.glob(f"{scene_name}*.png"))
+            if png_files:
+                return png_files[0]
+
+            # Tier 3: any PNG in the directory
+            any_png = sorted(images_dir.glob("*.png"))
+            if any_png:
+                return any_png[0]
+
+        # Tier 4: broader search across entire images dir
+        broader_images_dir = media_dir / "images"
+        if broader_images_dir.exists():
+            for image_file in broader_images_dir.rglob(f"{scene_name}*.png"):
+                return image_file
+
+        return None
+
     def copy_to_project(self, source: Path, dest_dir: Path) -> Path:
         """Copy video file to project output directory.
 
