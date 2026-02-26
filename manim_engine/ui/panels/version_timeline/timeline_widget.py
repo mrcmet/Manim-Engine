@@ -21,9 +21,10 @@ class TimelineWidget(QWidget):
 
     # Source colors (Catppuccin palette)
     SOURCE_COLORS = {
-        "ai": QColor("#89b4fa"),  # Blue
+        "ai": QColor("#89b4fa"),        # Blue
         "manual_edit": QColor("#a6e3a1"),  # Green
-        "variable_tweak": QColor("#fab387"),  # Orange
+        "snippet": QColor("#fab387"),   # Orange
+        "variable_tweak": QColor("#fab387"),  # Orange (legacy alias)
     }
 
     def __init__(self, parent=None):
@@ -240,7 +241,8 @@ class TimelineWidget(QWidget):
         source_display = {
             "ai": "AI Generated",
             "manual_edit": "Manual Edit",
-            "variable_tweak": "Variable Tweak",
+            "snippet": "Snippet Insert",
+            "variable_tweak": "Snippet Insert",  # legacy alias
         }.get(node.source, node.source.replace("_", " ").title())
         lines.append(f"Source: {source_display}")
 

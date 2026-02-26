@@ -9,7 +9,7 @@ class Version:
     project_id: str
     code: str
     prompt: str | None
-    source: str  # "ai" | "manual_edit" | "variable_tweak"
+    source: str  # "ai" | "manual_edit" | "snippet"
     parent_version_id: str | None
     created_at: datetime
     video_path: Path | None

@@ -8,10 +8,11 @@ from PySide6.QtGui import QKeySequence
 
 from app.signals import SignalBus
 from core.services.code_validator import CodeValidator
+from core.services.code_parser import CodeParser
 from core.services.project_service import ProjectService
 from core.services.version_service import VersionService
 from core.services.settings_service import SettingsService
-from core.services.variable_parser import VariableParser
+from core.services.snippets_service import SnippetsService
 from ai.ai_service import AIService
 from renderer.render_service import RenderService
 from renderer.render_config import RenderConfig
@@ -22,6 +23,7 @@ from ui.panels.preview_viewer.preview_panel import PreviewPanel
 from ui.panels.code_editor.code_editor_panel import CodeEditorPanel
 from ui.panels.project_explorer.project_explorer_panel import ProjectExplorerPanel
 from ui.panels.version_timeline.timeline_panel import TimelinePanel
+from ui.panels.snippets.snippets_panel import SnippetsPanel
 from ui.dialogs.new_project_dialog import NewProjectDialog
 from ui.dialogs.settings_dialog import SettingsDialog
 from ui.dialogs.export_dialog import ExportDialog
@@ -31,7 +33,8 @@ class MainWindow(QMainWindow):
     def __init__(self, signal_bus: SignalBus, project_service: ProjectService,
                  version_service: VersionService, ai_service: AIService,
                  render_service: RenderService, settings_service: SettingsService,
-                 theme_manager: ThemeManager):
+                 theme_manager: ThemeManager,
+                 snippets_service: SnippetsService | None = None):
         super().__init__()
         self.setWindowTitle("Manim Engine")
         self.setMinimumSize(1200, 800)
@@ -43,8 +46,11 @@ class MainWindow(QMainWindow):
         self._render_service = render_service
         self._settings_service = settings_service
         self._theme_manager = theme_manager
+        self._snippets_service = snippets_service or SnippetsService()
         self._current_project = None
         self._current_version_id = None
+        self._last_version_code: str = ""
+        self._snippet_used_since_last_version: bool = False
 
         self._create_panels()
         self._create_menus()
@@ -65,10 +71,14 @@ class MainWindow(QMainWindow):
         self._project_explorer.setObjectName("ProjectExplorer")
         self._version_timeline = TimelinePanel()
         self._version_timeline.setObjectName("VersionTimeline")
+        self._snippets_panel = SnippetsPanel(self._snippets_service)
+        self._snippets_panel.setObjectName("SnippetsPanel")
 
     def _setup_layout(self):
-        # Left docks: Variable Explorer (top) + Prompt Panel (bottom)
+        # Left docks: Variable Explorer (tabbed with Snippets) + Prompt Panel (below)
         self.addDockWidget(Qt.LeftDockWidgetArea, self._variable_explorer)
+        self.addDockWidget(Qt.LeftDockWidgetArea, self._snippets_panel)
+        self.tabifyDockWidget(self._variable_explorer, self._snippets_panel)
         self.addDockWidget(Qt.LeftDockWidgetArea, self._prompt_panel)
         self.splitDockWidget(self._variable_explorer, self._prompt_panel, Qt.Vertical)
 
@@ -102,6 +112,7 @@ class MainWindow(QMainWindow):
         view_menu = menu_bar.addMenu("View")
         view_menu.addAction(self._project_explorer.toggleViewAction())
         view_menu.addAction(self._variable_explorer.toggleViewAction())
+        view_menu.addAction(self._snippets_panel.toggleViewAction())
         view_menu.addAction(self._version_timeline.toggleViewAction())
 
         # Render menu
@@ -136,8 +147,16 @@ class MainWindow(QMainWindow):
         # Version timeline
         self._version_timeline.version_selected.connect(self._on_version_selected)
 
-        # Variable explorer
-        self._variable_explorer.variable_edited.connect(self._on_variable_edited)
+        # Selection indicator
+        self._code_editor.get_editor_widget().selectionChanged.connect(
+            self._on_editor_selection_changed
+        )
+
+        # Code Explorer — navigate to line on tree-node click
+        self._variable_explorer.navigate_to_line.connect(self._code_editor.navigate_to_line)
+
+        # Snippets panel — insert code at cursor
+        self._snippets_panel.snippet_insert_requested.connect(self._on_snippet_insert)
 
         # Project explorer
         self._project_explorer.project_selected.connect(self._on_project_selected)
@@ -148,20 +167,24 @@ class MainWindow(QMainWindow):
     def _on_prompt_submitted(self, prompt: str, include_code: bool):
         self._prompt_panel.add_history_entry(prompt, "pending")
         current_code = self._code_editor.get_code() if include_code else None
+        selected_code = self._code_editor.get_selected_text() or None
+        custom_context = self._settings_service.get("custom_prompt_context", "") or None
         provider = self._prompt_panel.get_selected_provider()
         self._ai_service.set_active_provider(provider)
-        self._ai_service.generate_code(prompt, current_code)
+        self._ai_service.generate_code(prompt, current_code, selected_code, custom_context)
 
     def _on_code_generated(self, code: str):
         self._prompt_panel.set_loading(False)
         self._prompt_panel.update_last_history("success", "Code generated")
         self._code_editor.set_code(code)
-        if self._current_project:
+        if self._current_project and code.strip() != self._last_version_code.strip():
             version = self._version_service.create_version(
                 self._current_project.id, code,
                 source="ai", parent_version_id=self._current_version_id
             )
             self._current_version_id = version.id
+            self._last_version_code = code
+            self._snippet_used_since_last_version = False
             self._refresh_timeline()
         valid, _ = CodeValidator.validate_syntax(code)
         if valid:
@@ -176,18 +199,21 @@ class MainWindow(QMainWindow):
         code = self._code_editor.get_code()
         if not code.strip():
             return
-        if self._current_project:
+        if self._current_project and code.strip() != self._last_version_code.strip():
+            source = "snippet" if self._snippet_used_since_last_version else "manual_edit"
             version = self._version_service.create_version(
                 self._current_project.id, code,
-                source="manual_edit", parent_version_id=self._current_version_id
+                source=source, parent_version_id=self._current_version_id
             )
             self._current_version_id = version.id
+            self._last_version_code = code
+            self._snippet_used_since_last_version = False
             self._refresh_timeline()
         self._render_service.render(code)
 
     def _on_code_changed(self, code: str):
-        variables = VariableParser.extract_variables(code)
-        self._variable_explorer.set_variables(variables)
+        structure = CodeParser.parse(code)
+        self._variable_explorer.set_code_structure(structure)
 
     def _on_render_finished(self, video_path: str):
         self._preview_viewer.load_video(Path(video_path))
@@ -196,7 +222,7 @@ class MainWindow(QMainWindow):
         self._preview_viewer.load_image(Path(image_path))
         if self._current_project and self._current_version_id:
             self._version_service.set_video_path(
-                self._current_project.id, self._current_version_id, Path(video_path)
+                self._current_project.id, self._current_version_id, Path(image_path)
             )
 
     def _on_render_failed(self, error: str):
@@ -209,25 +235,14 @@ class MainWindow(QMainWindow):
             self._current_project.id, version_id
         )
         self._current_version_id = version.id
+        self._last_version_code = version.code
+        self._snippet_used_since_last_version = False
         self._code_editor.set_code(version.code)
         if version.video_path and Path(str(version.video_path)).exists():
             self._preview_viewer.load_video(Path(str(version.video_path)))
         else:
             self._preview_viewer.clear()
         self._version_timeline.select_version(version_id)
-
-    def _on_variable_edited(self, var_name: str, new_value):
-        current_code = self._code_editor.get_code()
-        modified_code = VariableParser.replace_variable(current_code, var_name, new_value)
-        self._code_editor.set_code(modified_code)
-        if self._current_project:
-            version = self._version_service.create_version(
-                self._current_project.id, modified_code,
-                source="variable_tweak", parent_version_id=self._current_version_id
-            )
-            self._current_version_id = version.id
-            self._refresh_timeline()
-        self._render_service.render(modified_code)
 
     def _on_project_selected(self, project_id: str):
         project = self._project_service.open_project(project_id)
@@ -238,6 +253,8 @@ class MainWindow(QMainWindow):
         if versions:
             latest = versions[-1]
             self._current_version_id = latest.id
+            self._last_version_code = latest.code
+            self._snippet_used_since_last_version = False
             self._code_editor.set_code(latest.code)
             self._version_timeline.select_version(latest.id)
             if latest.video_path and Path(str(latest.video_path)).exists():
@@ -246,6 +263,23 @@ class MainWindow(QMainWindow):
             self._code_editor.set_code("")
             self._preview_viewer.clear()
         self._refresh_project_list()
+
+    def _on_editor_selection_changed(self) -> None:
+        text = self._code_editor.get_selected_text()
+        if text.strip():
+            lines = text.count('\n') + 1
+            self._prompt_panel.set_selection_active(f"Selection active ({lines} lines)")
+        else:
+            self._prompt_panel.set_selection_active("")
+
+    def _on_snippet_insert(self, code: str) -> None:
+        """Insert snippet *code* at the current cursor position in the editor."""
+        editor = self._code_editor.get_editor_widget()
+        cursor = editor.textCursor()
+        cursor.insertText(code)
+        editor.setTextCursor(cursor)
+        editor.setFocus()
+        self._snippet_used_since_last_version = True
 
     # --- Dialogs ---
 
@@ -261,7 +295,14 @@ class MainWindow(QMainWindow):
         dialog = SettingsDialog(self._settings_service, self._theme_manager, self)
         if dialog.exec():
             self._apply_theme()
+            self._reload_ai_providers()
             self._bus.settings_changed.emit()
+
+    def _reload_ai_providers(self):
+        """Recreate provider instances from the current saved settings."""
+        settings = self._settings_service.load()
+        for name, config in settings.ai_providers.items():
+            self._ai_service.reload_provider(name, config)
 
     def _export_dialog(self):
         dialog = ExportDialog(self)
@@ -292,6 +333,7 @@ class MainWindow(QMainWindow):
         theme = self._theme_manager.get_theme()
         self.setStyleSheet(self._theme_manager.get_app_stylesheet(theme))
         self._code_editor.set_theme(theme)
+        self._snippets_panel.apply_theme(theme)
         self._bus.theme_changed.emit(theme)
 
     def _restore_state(self):
