@@ -6,16 +6,12 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QKeySequence
 
+from app.controller import AppController
 from app.signals import SignalBus
-from core.services.code_validator import CodeValidator
 from core.services.code_parser import CodeParser
-from core.services.project_service import ProjectService
-from core.services.version_service import VersionService
-from core.services.settings_service import SettingsService
 from core.services.snippets_service import SnippetsService
-from ai.ai_service import AIService
-from renderer.render_service import RenderService
 from renderer.render_config import RenderConfig
+from ui.qt_bridge import QtBridge
 from ui.theme import ThemeManager
 from ui.panels.variable_explorer.variable_explorer_panel import VariableExplorerPanel
 from ui.panels.prompt_panel.prompt_panel import PromptPanel
@@ -30,27 +26,18 @@ from ui.dialogs.export_dialog import ExportDialog
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, signal_bus: SignalBus, project_service: ProjectService,
-                 version_service: VersionService, ai_service: AIService,
-                 render_service: RenderService, settings_service: SettingsService,
-                 theme_manager: ThemeManager,
+    def __init__(self, controller: AppController, bridge: QtBridge,
+                 signal_bus: SignalBus, theme_manager: ThemeManager,
                  snippets_service: SnippetsService | None = None):
         super().__init__()
         self.setWindowTitle("Manim Engine")
         self.setMinimumSize(1200, 800)
 
+        self._controller = controller
+        self._bridge = bridge
         self._bus = signal_bus
-        self._project_service = project_service
-        self._version_service = version_service
-        self._ai_service = ai_service
-        self._render_service = render_service
-        self._settings_service = settings_service
         self._theme_manager = theme_manager
         self._snippets_service = snippets_service or SnippetsService()
-        self._current_project = None
-        self._current_version_id = None
-        self._last_version_code: str = ""
-        self._snippet_used_since_last_version: bool = False
 
         self._create_panels()
         self._create_menus()
@@ -122,74 +109,58 @@ class MainWindow(QMainWindow):
         render_menu.addAction("Cancel Render", self._cancel_render)
 
     def _wire_signals(self):
-        bus = self._bus
+        # Render
+        self._bridge.render_started.connect(lambda: self._preview_viewer.show_loading())
+        self._bridge.render_finished.connect(self._on_render_finished)
+        self._bridge.render_image_finished.connect(self._on_render_image_finished)
+        self._bridge.render_failed.connect(self._on_render_failed)
+        self._bridge.render_failed_detail.connect(self._on_render_failed_detail)
 
-        # Prompt → AI generation
+        # AI
+        self._bridge.ai_started.connect(lambda: self._prompt_panel.set_loading(True))
+        self._bridge.ai_finished.connect(self._on_ai_finished)
+        self._bridge.ai_failed.connect(self._on_ai_failed)
+
+        # Version / project
+        self._bridge.version_created.connect(lambda _: self._refresh_timeline())
+        self._bridge.project_opened.connect(self._on_project_opened)
+        self._bridge.code_changed_external.connect(self._code_editor.set_code)
+
+        # UI-local
         self._prompt_panel.prompt_submitted.connect(self._on_prompt_submitted)
-
-        # AI results → Code editor
-        bus.ai_generation_finished.connect(self._on_code_generated)
-        bus.ai_generation_failed.connect(self._on_ai_failed)
-        bus.ai_generation_started.connect(lambda: self._prompt_panel.set_loading(True))
-
-        # Code editor → Render
         self._code_editor.run_requested.connect(self._on_run_requested)
-
-        # Code changed → Variable extraction
         self._code_editor.code_changed.connect(self._on_code_changed)
-
-        # Render results → Preview
-        bus.render_finished.connect(self._on_render_finished)
-        bus.render_image_finished.connect(self._on_render_image_finished)
-        bus.render_failed.connect(self._on_render_failed)
-        bus.render_failed_detail.connect(self._on_render_failed_detail)
-        bus.render_started.connect(lambda: self._preview_viewer.show_loading())
-
-        # Version timeline
         self._version_timeline.version_selected.connect(self._on_version_selected)
+        self._snippets_panel.snippet_insert_requested.connect(self._on_snippet_insert)
+        self._project_explorer.project_selected.connect(self._controller.open_project)
+        self._project_explorer.new_project_requested.connect(self._new_project)
+
+        # Code Explorer — navigate to line on tree-node click
+        self._variable_explorer.navigate_to_line.connect(self._code_editor.navigate_to_line)
 
         # Selection indicator
         self._code_editor.get_editor_widget().selectionChanged.connect(
             self._on_editor_selection_changed
         )
 
-        # Code Explorer — navigate to line on tree-node click
-        self._variable_explorer.navigate_to_line.connect(self._code_editor.navigate_to_line)
-
-        # Snippets panel — insert code at cursor
-        self._snippets_panel.snippet_insert_requested.connect(self._on_snippet_insert)
-
-        # Project explorer
-        self._project_explorer.project_selected.connect(self._on_project_selected)
-        self._project_explorer.new_project_requested.connect(self._new_project)
-
     # --- Handlers ---
 
     def _on_prompt_submitted(self, prompt: str, include_code: bool):
         self._prompt_panel.add_history_entry(prompt, "pending")
-        current_code = self._code_editor.get_code() if include_code else None
-        selected_code = self._code_editor.get_selected_text() or None
-        custom_context = self._settings_service.get("custom_prompt_context", "") or None
-        provider = self._prompt_panel.get_selected_provider()
-        self._ai_service.set_active_provider(provider)
-        self._ai_service.generate_code(prompt, current_code, selected_code, custom_context)
+        settings = self._controller.get_settings()
+        custom_context = getattr(settings, "custom_prompt_context", "") or None
+        self._controller.submit_prompt(
+            prompt,
+            self._code_editor.get_code() if include_code else None,
+            self._code_editor.get_selected_text() or None,
+            custom_context,
+            self._prompt_panel.get_selected_provider(),
+        )
 
-    def _on_code_generated(self, code: str):
+    def _on_ai_finished(self, code: str):
         self._prompt_panel.set_loading(False)
         self._prompt_panel.update_last_history("success", "Code generated")
         self._code_editor.set_code(code)
-        if self._current_project and code.strip() != self._last_version_code.strip():
-            version = self._version_service.create_version(
-                self._current_project.id, code,
-                source="ai", parent_version_id=self._current_version_id
-            )
-            self._current_version_id = version.id
-            self._last_version_code = code
-            self._snippet_used_since_last_version = False
-            self._refresh_timeline()
-        valid, _ = CodeValidator.validate_syntax(code)
-        if valid:
-            self._render_service.render(code)
 
     def _on_ai_failed(self, error: str):
         self._prompt_panel.set_loading(False)
@@ -197,20 +168,7 @@ class MainWindow(QMainWindow):
         QMessageBox.warning(self, "AI Generation Failed", error)
 
     def _on_run_requested(self):
-        code = self._code_editor.get_code()
-        if not code.strip():
-            return
-        if self._current_project and code.strip() != self._last_version_code.strip():
-            source = "snippet" if self._snippet_used_since_last_version else "manual_edit"
-            version = self._version_service.create_version(
-                self._current_project.id, code,
-                source=source, parent_version_id=self._current_version_id
-            )
-            self._current_version_id = version.id
-            self._last_version_code = code
-            self._snippet_used_since_last_version = False
-            self._refresh_timeline()
-        self._render_service.render(code)
+        self._controller.run_code(self._code_editor.get_code())
 
     def _on_code_changed(self, code: str):
         structure = CodeParser.parse(code)
@@ -223,10 +181,6 @@ class MainWindow(QMainWindow):
     def _on_render_image_finished(self, image_path: str):
         self._preview_viewer.load_image(Path(image_path))
         self._code_editor.clear_render_error()
-        if self._current_project and self._current_version_id:
-            self._version_service.set_video_path(
-                self._current_project.id, self._current_version_id, Path(image_path)
-            )
 
     def _on_render_failed(self, error: str):
         self._preview_viewer.show_error(error)
@@ -235,33 +189,22 @@ class MainWindow(QMainWindow):
         self._code_editor.show_render_error(parsed_error, stdout, stderr)
 
     def _on_version_selected(self, version_id: str):
-        if not self._current_project:
-            return
-        version = self._version_service.get_version(
-            self._current_project.id, version_id
-        )
-        self._current_version_id = version.id
-        self._last_version_code = version.code
-        self._snippet_used_since_last_version = False
-        self._code_editor.set_code(version.code)
-        if version.video_path and Path(str(version.video_path)).exists():
-            self._preview_viewer.load_video(Path(str(version.video_path)))
-        else:
-            self._preview_viewer.clear()
+        self._controller.load_version(version_id)
+        project = self._controller.get_active_project()
+        if project:
+            version = self._controller.get_version(project.id, version_id)
+            if version.video_path and Path(str(version.video_path)).exists():
+                self._preview_viewer.load_video(Path(str(version.video_path)))
+            else:
+                self._preview_viewer.clear()
         self._version_timeline.select_version(version_id)
 
-    def _on_project_selected(self, project_id: str):
-        project = self._project_service.open_project(project_id)
-        self._current_project = project
-        self._settings_service.set("last_project_id", project_id)
-        versions = self._version_service.list_versions(project_id)
+    def _on_project_opened(self, project_id: str, project_name: str):
+        versions = self._controller.get_versions(project_id)
         self._version_timeline.set_versions(versions)
         if versions:
             latest = versions[-1]
-            self._current_version_id = latest.id
-            self._last_version_code = latest.code
-            self._snippet_used_since_last_version = False
-            self._code_editor.set_code(latest.code)
+            self._controller.load_version(latest.id)
             self._version_timeline.select_version(latest.id)
             if latest.video_path and Path(str(latest.video_path)).exists():
                 self._preview_viewer.load_video(Path(str(latest.video_path)))
@@ -279,13 +222,12 @@ class MainWindow(QMainWindow):
             self._prompt_panel.set_selection_active("")
 
     def _on_snippet_insert(self, code: str) -> None:
-        """Insert snippet *code* at the current cursor position in the editor."""
         editor = self._code_editor.get_editor_widget()
         cursor = editor.textCursor()
         cursor.insertText(code)
         editor.setTextCursor(cursor)
         editor.setFocus()
-        self._snippet_used_since_last_version = True
+        self._controller.mark_snippet_used()
 
     # --- Dialogs ---
 
@@ -294,21 +236,19 @@ class MainWindow(QMainWindow):
         if dialog.exec():
             name, desc = dialog.get_values()
             if name.strip():
-                project = self._project_service.create_project(name, desc)
-                self._on_project_selected(project.id)
+                self._controller.create_project(name, desc)
 
     def _open_settings(self):
-        dialog = SettingsDialog(self._settings_service, self._theme_manager, self)
+        dialog = SettingsDialog(self._controller.get_settings_service(), self._theme_manager, self)
         if dialog.exec():
             self._apply_theme()
             self._reload_ai_providers()
             self._bus.settings_changed.emit()
 
     def _reload_ai_providers(self):
-        """Recreate provider instances from the current saved settings."""
-        settings = self._settings_service.load()
+        settings = self._controller.get_settings()
         for name, config in settings.ai_providers.items():
-            self._ai_service.reload_provider(name, config)
+            self._controller.reload_ai_provider(name, config)
 
     def _export_dialog(self):
         dialog = ExportDialog(self)
@@ -316,22 +256,22 @@ class MainWindow(QMainWindow):
             quality, fmt = dialog.get_values()
             config = RenderConfig(quality=quality, format=fmt)
             code = self._code_editor.get_code()
-            self._render_service.render(code, config=config)
+            self._controller.run_code(code, config=config)
 
     # --- Render shortcuts ---
 
     def _run_low(self):
         code = self._code_editor.get_code()
         if code.strip():
-            self._render_service.render(code, config=RenderConfig(quality="l"))
+            self._controller.run_code(code, config=RenderConfig(quality="l"))
 
     def _run_high(self):
         code = self._code_editor.get_code()
         if code.strip():
-            self._render_service.render(code, config=RenderConfig(quality="h"))
+            self._controller.run_code(code, config=RenderConfig(quality="h"))
 
     def _cancel_render(self):
-        self._render_service.cancel_render()
+        self._controller.cancel_render()
 
     # --- State ---
 
@@ -343,7 +283,7 @@ class MainWindow(QMainWindow):
         self._bus.theme_changed.emit(theme)
 
     def _restore_state(self):
-        settings = self._settings_service.load()
+        settings = self._controller.get_settings()
         if settings.window_geometry:
             self.restoreGeometry(settings.window_geometry)
         if settings.window_state:
@@ -351,11 +291,11 @@ class MainWindow(QMainWindow):
         # Load last project
         if settings.last_project_id:
             try:
-                self._on_project_selected(settings.last_project_id)
+                self._controller.open_project(settings.last_project_id)
             except Exception:
                 pass
         # Set providers in prompt panel
-        providers = self._ai_service.get_available_providers()
+        providers = self._controller.get_active_providers()
         active = settings.active_provider
         if providers:
             self._prompt_panel.set_providers(providers, active)
@@ -363,27 +303,28 @@ class MainWindow(QMainWindow):
         self._refresh_project_list()
 
     def _load_sample_if_empty(self):
-        """Load sample code if editor is empty (no project loaded)."""
         if not self._code_editor.get_code().strip():
             sample = Path(__file__).parent.parent / "samples" / "circle_animation.py"
             if sample.exists():
                 self._code_editor.set_code(sample.read_text())
 
     def _refresh_project_list(self):
-        projects = self._project_service.list_projects()
+        projects = self._controller.get_projects()
         self._project_explorer.refresh_projects(projects)
 
     def _refresh_timeline(self):
-        if self._current_project:
-            versions = self._version_service.list_versions(self._current_project.id)
+        project = self._controller.get_active_project()
+        if project:
+            versions = self._controller.get_versions(project.id)
             self._version_timeline.set_versions(versions)
-            if self._current_version_id:
-                self._version_timeline.select_version(self._current_version_id)
+            active_version = self._controller.get_current_version_id()
+            if active_version:
+                self._version_timeline.select_version(active_version)
 
     def closeEvent(self, event):
-        settings = self._settings_service.load()
-        settings.window_geometry = self.saveGeometry()
-        settings.window_state = self.saveState()
-        self._settings_service.save(settings)
-        self._render_service.cleanup()
+        self._controller.save_window_state(
+            bytes(self.saveGeometry()),
+            bytes(self.saveState()),
+        )
+        self._controller.cleanup()
         super().closeEvent(event)

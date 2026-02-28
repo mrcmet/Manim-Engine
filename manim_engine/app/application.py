@@ -39,6 +39,10 @@ class ManimEngineApp(QApplication):
         from renderer.render_service import RenderService
         from ui.theme import ThemeManager
         from ui.main_window import MainWindow
+        from app.event_bus import EventBus
+        from app.service_container import ServiceContainer
+        from app.controller import AppController
+        from ui.qt_bridge import QtBridge
 
         # Setup AI providers
         registry = ProviderRegistry()
@@ -70,13 +74,22 @@ class ManimEngineApp(QApplication):
         render_service = RenderService(self._signal_bus)
         theme_manager = ThemeManager(self._settings_service)
 
-        self._main_window = MainWindow(
-            signal_bus=self._signal_bus,
+        # Architecture layers
+        event_bus = EventBus()
+        container = ServiceContainer(
             project_service=self._project_service,
             version_service=self._version_service,
-            ai_service=ai_service,
-            render_service=render_service,
             settings_service=self._settings_service,
+            snippets_service=self._snippets_service,
+            ai_service=ai_service,
+        )
+        controller = AppController(container, event_bus, render_service)
+        bridge = QtBridge(controller, event_bus, self._signal_bus)
+
+        self._main_window = MainWindow(
+            controller=controller,
+            bridge=bridge,
+            signal_bus=self._signal_bus,
             theme_manager=theme_manager,
             snippets_service=self._snippets_service,
         )

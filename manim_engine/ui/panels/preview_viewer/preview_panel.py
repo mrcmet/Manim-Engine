@@ -99,11 +99,12 @@ class PreviewPanel(QDockWidget):
         self._stack.setCurrentWidget(self._image_label)
 
     def show_loading(self, message: str = "Rendering..."):
-        """Show loading overlay.
+        """Show loading overlay and stop any currently playing video.
 
         Args:
             message: Status message to display
         """
+        self.video_player.media_player.stop()
         self.overlay.show_loading(message)
 
     def show_error(self, message: str):
